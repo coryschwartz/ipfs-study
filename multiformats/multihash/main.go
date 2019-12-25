@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
 	"os"
+	"strings"
 
 	"github.com/google/subcommands"
 	"github.com/multiformats/go-multihash"
@@ -15,19 +17,19 @@ import (
 type listCmd struct {
 }
 
-func (l *listCmd) Name() string {
+func (c *listCmd) Name() string {
 	return "list"
 }
 
-func (l *listCmd) Synopsis() string {
+func (c *listCmd) Synopsis() string {
 	return "list available hash algorithms"
 }
 
-func (l *listCmd) Usage() string {
+func (c *listCmd) Usage() string {
 	return "list"
 }
 
-func (l *listCmd) SetFlags(f *flag.FlagSet) {
+func (c *listCmd) SetFlags(f *flag.FlagSet) {
 	return
 }
 
@@ -79,6 +81,57 @@ func (c *sumCmd) Execute(_ context.Context, f *flag.FlagSet, args ...interface{}
 	return subcommands.ExitSuccess
 }
 
+type checkCmd struct {
+}
+
+func (c *checkCmd) Name() string {
+	return "check"
+}
+
+func (c *checkCmd) Synopsis() string {
+	return "read sums from file and check them"
+}
+
+func (c *checkCmd) Usage() string {
+	return `check <filename>:
+	read sums from <filename> to verify files
+	`
+}
+
+func (c *checkCmd) SetFlags(f *flag.FlagSet) {
+	return
+}
+
+func (c *checkCmd) Execute(_ context.Context, f *flag.FlagSet, args ...interface{}) subcommands.ExitStatus {
+	if f.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, c.Usage())
+		return subcommands.ExitUsageError
+	}
+	sumFileName := f.Arg(0)
+	sumFile, err := os.Open(sumFileName)
+	if err != nil {
+		panic(err)
+	}
+	defer sumFile.Close()
+	scanner := bufio.NewScanner(sumFile)
+	for scanner.Scan() {
+		// similarly to an MD5SUMS file,
+		// left side has the multihash string
+		// right side has the filename
+		fields := strings.Fields(scanner.Text())
+		left, _ := multihash.FromHexString(fields[0])
+		leftd, _ := multihash.Decode(left)
+		right, _ := MultihashOfFile(fields[1], leftd.Name)
+		if left.String() == right.String() {
+			fmt.Printf("%s  PASS\n", fields[1])
+		} else {
+			fmt.Printf("%s  FAIL\n", fields[1])
+		}
+	}
+
+	return subcommands.ExitSuccess
+}
+
 func MultihashOfFile(filename string, algorithm string) (multihash.Multihash, error) {
 	var buf []byte
 	var err error
@@ -105,6 +158,7 @@ func main() {
 	subcommands.Register(subcommands.CommandsCommand(), "")
 	subcommands.Register(&listCmd{}, "")
 	subcommands.Register(&sumCmd{}, "")
+	subcommands.Register(&checkCmd{}, "")
 
 	flag.Parse()
 	ctx := context.Background()
